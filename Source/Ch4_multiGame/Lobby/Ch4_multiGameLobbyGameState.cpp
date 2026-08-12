@@ -3,7 +3,23 @@
 #include "Lobby/Ch4_multiGameLobbyGameState.h"
 
 #include "Ch4_multiGame.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
+
+void ACh4_multiGameLobbyGameState::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (GetNetMode() == NM_Client)
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[Lobby] CLIENT CONNECTED | Replicated Players: %d / %d"),
+			CurrentPlayerCount,
+			MaxPlayerCount);
+		ShowClientDebugStatus();
+	}
+}
 
 void ACh4_multiGameLobbyGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
@@ -49,9 +65,21 @@ void ACh4_multiGameLobbyGameState::OnRep_CurrentPlayerCount()
 		CurrentPlayerCount,
 		MaxPlayerCount);
 	BroadcastPlayerCountChanged();
+	ShowClientDebugStatus();
 }
 
 void ACh4_multiGameLobbyGameState::BroadcastPlayerCountChanged()
 {
 	OnPlayerCountChanged.Broadcast(CurrentPlayerCount, MaxPlayerCount);
+}
+
+void ACh4_multiGameLobbyGameState::ShowClientDebugStatus() const
+{
+	if (GEngine && GetNetMode() == NM_Client)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, FString::Printf(
+			TEXT("[LOBBY CLIENT CONNECTED]\nPlayers: %d / %d\nMap: L_Lobby"),
+			CurrentPlayerCount,
+			MaxPlayerCount));
+	}
 }

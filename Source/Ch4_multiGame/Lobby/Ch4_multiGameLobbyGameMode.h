@@ -36,5 +36,7 @@ protected:
 private:
 	class ACh4_multiGameLobbyGameState* GetLobbyGameState() const;
 	void UpdateLobbyPlayerCount(int32 NewPlayerCount);
+	void ShowServerDebugStatus(const FString& EventMessage, const FColor& Color, float Duration) const;
+	int32 GetListenPort() const;
 	FString GetPlayerLogLabel(const AController* Controller) const;
 };
