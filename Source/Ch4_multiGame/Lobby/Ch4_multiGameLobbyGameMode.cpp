@@ -10,24 +10,24 @@
 #include "GameFramework/PlayerState.h"
 #include "IPAddress.h"
 #include "Lobby/Ch4_multiGameLobbyGameState.h"
+#include "Lobby/Ch4_multiGameLobbyPlayerController.h"
+#include "Lobby/Ch4_multiGameLobbyPlayerState.h"
+#include "Misc/PackageName.h"
+#include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 ACh4_multiGameLobbyGameMode::ACh4_multiGameLobbyGameMode()
 {
 	GameStateClass = ACh4_multiGameLobbyGameState::StaticClass();
+	PlayerStateClass = ACh4_multiGameLobbyPlayerState::StaticClass();
+	PlayerControllerClass = ACh4_multiGameLobbyPlayerController::StaticClass();
+	bUseSeamlessTravel = false;
 
 	static ConstructorHelpers::FClassFinder<APawn> ThirdPersonPawnClass(
 		TEXT("/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"));
 	if (ThirdPersonPawnClass.Succeeded())
 	{
 		DefaultPawnClass = ThirdPersonPawnClass.Class;
-	}
-
-	static ConstructorHelpers::FClassFinder<APlayerController> ThirdPersonControllerClass(
-		TEXT("/Game/ThirdPerson/Blueprints/BP_ThirdPersonPlayerController"));
-	if (ThirdPersonControllerClass.Succeeded())
-	{
-		PlayerControllerClass = ThirdPersonControllerClass.Class;
 	}
 }
 
@@ -81,6 +81,10 @@ void ACh4_multiGameLobbyGameMode::PreLogin(
 	if (ErrorMessage.IsEmpty() && GetNumPlayers() >= MaxLobbyPlayers)
 	{
 		ErrorMessage = FString::Printf(TEXT("Lobby is full (%d/%d)."), GetNumPlayers(), MaxLobbyPlayers);
+	}
+	else if (ErrorMessage.IsEmpty() && bTravelStarted)
+	{
+		ErrorMessage = TEXT("Lobby is already traveling to the game map.");
 	}
 
 	if (!ErrorMessage.IsEmpty())
@@ -144,6 +148,46 @@ void ACh4_multiGameLobbyGameMode::Logout(AController* Exiting)
 		FString::Printf(TEXT("PLAYER LEFT\nPlayers: %d / %d"), RemainingPlayerCount, MaxLobbyPlayers),
 		FColor::Yellow,
 		10.0f);
+
+	// PlayerArray cleanup finishes after Logout. Recheck on the next event-loop turn
+	// so a departing non-ready player cannot remain in the Ready count.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimerForNextTick(
+			this,
+			&ACh4_multiGameLobbyGameMode::CheckAllPlayersReady);
+	}
+}
+
+void ACh4_multiGameLobbyGameMode::HandlePlayerReady(APlayerController* RequestingPlayer)
+{
+	if (!HasAuthority() || bTravelStarted || !IsValid(RequestingPlayer))
+	{
+		return;
+	}
+
+	ACh4_multiGameLobbyPlayerState* LobbyPlayerState =
+		RequestingPlayer->GetPlayerState<ACh4_multiGameLobbyPlayerState>();
+	if (!IsValid(LobbyPlayerState))
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[Lobby] Ready request rejected: %s has no Lobby PlayerState"),
+			*GetPlayerLogLabel(RequestingPlayer));
+		return;
+	}
+
+	if (!LobbyPlayerState->SetReady())
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[Lobby] Duplicate Ready request ignored: %s"),
+			*GetPlayerLogLabel(RequestingPlayer));
+		return;
+	}
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Lobby] Player Ready: %s"),
+		*GetPlayerLogLabel(RequestingPlayer));
+	CheckAllPlayersReady();
 }
 
 ACh4_multiGameLobbyGameState* ACh4_multiGameLobbyGameMode::GetLobbyGameState() const
@@ -161,6 +205,108 @@ void ACh4_multiGameLobbyGameMode::UpdateLobbyPlayerCount(const int32 NewPlayerCo
 	{
 		UE_LOG(LogCh4_multiGame, Error,
 			TEXT("[Lobby] ACh4_multiGameLobbyGameState is not active. Check the Lobby GameMode assignment."));
+	}
+}
+
+void ACh4_multiGameLobbyGameMode::CheckAllPlayersReady()
+{
+	if (!HasAuthority() || bTravelStarted)
+	{
+		return;
+	}
+
+	int32 ReadyPlayers = 0;
+	int32 TotalPlayers = 0;
+	GetReadyPlayerCounts(ReadyPlayers, TotalPlayers);
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Lobby] Ready Players: %d / %d"),
+		ReadyPlayers,
+		TotalPlayers);
+	ShowServerDebugStatus(
+		FString::Printf(TEXT("READY PLAYERS: %d / %d"), ReadyPlayers, TotalPlayers),
+		ReadyPlayers == TotalPlayers && TotalPlayers > 0 ? FColor::Green : FColor::Cyan,
+		8.0f);
+
+	if (TotalPlayers > 0 && ReadyPlayers == TotalPlayers)
+	{
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] All Players Ready"));
+		StartGameTravel();
+	}
+}
+
+void ACh4_multiGameLobbyGameMode::GetReadyPlayerCounts(
+	int32& OutReadyPlayers,
+	int32& OutTotalPlayers) const
+{
+	OutReadyPlayers = 0;
+	OutTotalPlayers = 0;
+
+	const ACh4_multiGameLobbyGameState* LobbyGameState = GetLobbyGameState();
+	if (!IsValid(LobbyGameState))
+	{
+		return;
+	}
+
+	for (APlayerState* PlayerState : LobbyGameState->PlayerArray)
+	{
+		const ACh4_multiGameLobbyPlayerState* LobbyPlayerState =
+			Cast<ACh4_multiGameLobbyPlayerState>(PlayerState);
+		if (!IsValid(LobbyPlayerState) || LobbyPlayerState->IsInactive())
+		{
+			continue;
+		}
+
+		++OutTotalPlayers;
+		if (LobbyPlayerState->IsReady())
+		{
+			++OutReadyPlayers;
+		}
+	}
+}
+
+void ACh4_multiGameLobbyGameMode::StartGameTravel()
+{
+	if (!HasAuthority() || bTravelStarted)
+	{
+		return;
+	}
+
+	const FString MapPackage = GameplayMapPackage.ToString();
+	if (!FPackageName::IsValidLongPackageName(MapPackage) ||
+		!FPackageName::DoesPackageExist(MapPackage))
+	{
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[Lobby] Travel aborted: gameplay map package does not exist: %s"),
+			*MapPackage);
+		ShowServerDebugStatus(TEXT("TRAVEL FAILED\nGameplay map is missing"), FColor::Red, 15.0f);
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!IsValid(World))
+	{
+		return;
+	}
+
+	bTravelStarted = true;
+	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Traveling to %s"), *MapPackage);
+	ShowServerDebugStatus(
+		FString::Printf(TEXT("ALL PLAYERS READY\nTraveling to %s"), *MapPackage),
+		FColor::Green,
+		10.0f);
+
+	// Use an absolute URL so lobby-only options (especially ?game=LobbyGameMode)
+	// cannot leak into the gameplay map. Keep ?listen so non-seamless clients can
+	// reconnect to the same Listen Server after the map switch.
+	const FString TravelURL = MapPackage + TEXT("?listen");
+	if (!World->ServerTravel(TravelURL, true))
+	{
+		bTravelStarted = false;
+		UE_LOG(LogCh4_multiGame, Error,
+			TEXT("[Lobby] ServerTravel failed for %s"),
+			*MapPackage);
+		ShowServerDebugStatus(TEXT("SERVER TRAVEL FAILED\nCheck Output Log"), FColor::Red, 15.0f);
 	}
 }
 
