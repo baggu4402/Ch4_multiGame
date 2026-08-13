@@ -5,6 +5,9 @@
 #include "Backends/OnlineSubsystemVoiceBackend.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
+#include "HAL/PlatformTime.h"
+#include "Net/VoiceConfig.h"
 #include "SimpleVoiceChatLog.h"
 #include "SimpleVoiceChatSettings.h"
 #include "UObject/UObjectGlobals.h"
@@ -75,6 +78,7 @@ bool USimpleVoiceChatSubsystem::InitializeVoice()
         VoiceBackend = MakeUnique<FOnlineSubsystemVoiceBackend>();
     }
 
+    ApplyRuntimeAudioSettings();
     bVoiceInitialized = true;
     UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
     StartRefreshTimer(World);
@@ -100,6 +104,7 @@ void USimpleVoiceChatSubsystem::ShutdownVoice()
     }
 
     bVoiceInitialized = false;
+    bRuntimeAudioSettingsApplied = false;
     if (bMicrophoneEnabled)
     {
         bMicrophoneEnabled = false;
@@ -178,6 +183,25 @@ void USimpleVoiceChatSubsystem::RefreshVoiceState()
     }
 }
 
+void USimpleVoiceChatSubsystem::HandlePeriodicVoiceRefresh()
+{
+    const double CurrentTimeSeconds = FPlatformTime::Seconds();
+    if (LastPeriodicRefreshTimeSeconds > 0.0)
+    {
+        const double ElapsedSeconds = CurrentTimeSeconds - LastPeriodicRefreshTimeSeconds;
+        if (ElapsedSeconds > 1.5)
+        {
+            UE_LOG(
+                LogSimpleVoiceChat,
+                Warning,
+                TEXT("Voice servicing was delayed for %.2f seconds by a game-thread stall; transmitted audio may sound choppy"),
+                ElapsedSeconds);
+        }
+    }
+    LastPeriodicRefreshTimeSeconds = CurrentTimeSeconds;
+    RefreshVoiceState();
+}
+
 void USimpleVoiceChatSubsystem::StartRefreshTimer(UWorld* World)
 {
     StopRefreshTimer();
@@ -187,10 +211,11 @@ void USimpleVoiceChatSubsystem::StartRefreshTimer(UWorld* World)
     }
 
     RefreshTimerWorld = World;
+    LastPeriodicRefreshTimeSeconds = FPlatformTime::Seconds();
     World->GetTimerManager().SetTimer(
         RefreshTimerHandle,
         this,
-        &USimpleVoiceChatSubsystem::RefreshVoiceState,
+        &USimpleVoiceChatSubsystem::HandlePeriodicVoiceRefresh,
         1.0f,
         true,
         0.25f);
@@ -204,6 +229,39 @@ void USimpleVoiceChatSubsystem::StopRefreshTimer()
     }
     RefreshTimerWorld.Reset();
     RefreshTimerHandle.Invalidate();
+    LastPeriodicRefreshTimeSeconds = 0.0;
+}
+
+void USimpleVoiceChatSubsystem::ApplyRuntimeAudioSettings()
+{
+    if (bRuntimeAudioSettingsApplied)
+    {
+        return;
+    }
+
+    const USimpleVoiceChatSettings* Settings = GetDefault<USimpleVoiceChatSettings>();
+    IConsoleVariable* MicrophoneGain = IConsoleManager::Get().FindConsoleVariable(TEXT("voice.MicInputGain"));
+    IConsoleVariable* JitterDelay = IConsoleManager::Get().FindConsoleVariable(TEXT("voice.JitterBufferDelay"));
+    if (!MicrophoneGain || !JitterDelay)
+    {
+        UE_LOG(LogSimpleVoiceChat, Warning, TEXT("Unreal voice quality console variables are unavailable"));
+        return;
+    }
+
+    const float InputGain = FMath::Clamp(Settings->MicrophoneInputGain, 0.0f, 4.0f);
+    const float JitterDelaySeconds = FMath::Clamp(Settings->JitterBufferDelaySeconds, 0.05f, 1.0f);
+    MicrophoneGain->Set(InputGain, ECVF_SetByGameSetting);
+    JitterDelay->Set(JitterDelaySeconds, ECVF_SetByGameSetting);
+    bRuntimeAudioSettingsApplied = true;
+
+    UE_LOG(
+        LogSimpleVoiceChat,
+        Log,
+        TEXT("Voice audio settings applied: sample-rate=%d Hz, playback-volume=%.2f, microphone-gain=%.2f, jitter-buffer=%.2f s"),
+        UVOIPStatics::GetVoiceSampleRate(),
+        FMath::Clamp(Settings->PlaybackVolumeMultiplier, 0.0f, 4.0f),
+        InputGain,
+        JitterDelaySeconds);
 }
 
 bool USimpleVoiceChatSubsystem::ApplyMicrophoneState(const bool bEnable)

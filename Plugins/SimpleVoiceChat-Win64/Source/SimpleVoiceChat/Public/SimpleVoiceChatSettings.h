@@ -36,6 +36,30 @@ public:
     UPROPERTY(Config, EditAnywhere, Category="Voice")
     bool bMicrophoneEnabledOnStart = false;
 
+    /** Opus target bitrate in bits per second. 32000 is a clear voice-oriented default for small groups. */
+    UPROPERTY(Config, EditAnywhere, Category="Quality", meta=(ClampMin="6000", ClampMax="64000", UIMin="6000", UIMax="64000"))
+    int32 EncoderBitrate = 32000;
+
+    /** Opus encoder effort. Higher values can improve quality but use more CPU. */
+    UPROPERTY(Config, EditAnywhere, Category="Quality", meta=(ClampMin="0", ClampMax="10", UIMin="0", UIMax="10"))
+    int32 EncoderComplexity = 5;
+
+    /** Keeps Opus variable-bitrate encoding enabled for better quality per transmitted byte. */
+    UPROPERTY(Config, EditAnywhere, Category="Quality")
+    bool bUseVariableBitrate = true;
+
+    /** Volume applied only when a remote voice is played. This does not amplify encoded microphone samples. */
+    UPROPERTY(Config, EditAnywhere, Category="Quality", meta=(ClampMin="0.0", ClampMax="4.0", UIMin="0.0", UIMax="2.0"))
+    float PlaybackVolumeMultiplier = 1.5f;
+
+    /** Input gain applied before encoding. Leave at 1.0 unless the Windows microphone level is still too low. */
+    UPROPERTY(Config, EditAnywhere, Category="Quality", meta=(ClampMin="0.0", ClampMax="4.0", UIMin="0.0", UIMax="2.0"))
+    float MicrophoneInputGain = 1.0f;
+
+    /** Buffered receive audio in seconds. Higher values tolerate jitter at the cost of more delay. */
+    UPROPERTY(Config, EditAnywhere, Category="Quality", meta=(ClampMin="0.05", ClampMax="1.0", UIMin="0.05", UIMax="0.5"))
+    float JitterBufferDelaySeconds = 0.3f;
+
     /**
      * Creates a temporary local identity when using OnlineSubsystem NULL for direct-IP testing.
      * Other OnlineSubsystem providers are never logged in by this option.

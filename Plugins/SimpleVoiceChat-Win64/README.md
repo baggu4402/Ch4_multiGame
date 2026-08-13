@@ -40,7 +40,14 @@ bHasVoiceEnabled=true
 
 [Voice]
 bEnabled=true
+
+[/Script/Engine.AudioSettings]
+VoiPSampleRate=Normal24000Hz
 ```
+
+`Normal24000Hz` is recommended for clearer speech than Unreal's 16 kHz default. Changing the
+VOIP sample rate requires a full Editor/game restart so capture, encoder, decoder, and playback
+are all created at the same rate.
 
 The active OnlineSubsystem and its authentication/session requirements must also be configured by the host project. If no voice interface is exposed, the plugin remains safe, logs one warning, and `IsVoiceAvailable()` returns `false`.
 
@@ -110,6 +117,12 @@ Open **Project Settings > Plugins > Simple Voice Chat**:
 - **Enable Automatic Toggle Key**: enables the focus-safe Slate key listener.
 - **Toggle Key**: defaults to `T`.
 - **Microphone Enabled On Start**: defaults to false and should remain opt-in for privacy.
+- **Encoder Bitrate**: defaults to 32000 bps for clearer speech in a small multiplayer group.
+- **Encoder Complexity**: defaults to 5, improving Opus quality without using its maximum CPU setting.
+- **Use Variable Bitrate**: defaults to true.
+- **Playback Volume Multiplier**: defaults to 1.5 and boosts only received playback, avoiding microphone-side clipping.
+- **Microphone Input Gain**: defaults to 1.0. Raise it only after checking the Windows input level because excess gain clips before encoding.
+- **Jitter Buffer Delay Seconds**: defaults to 0.3. A larger value can hide network jitter but increases voice delay.
 - **Auto Login Null Subsystem For Direct IP**: defaults to true and creates a temporary NULL identity before direct-IP testing. It never logs in Steam or another provider.
 - **Auto Create Null Voice Session For Direct IP**: defaults to true and creates a non-advertised local marker session only when NULL has no existing session. Unreal's legacy NULL voice implementation requires one before it accepts remote talkers.
 
@@ -166,6 +179,14 @@ If `IsVoiceAvailable()` is false or the log reports that voice is unavailable, c
 - Test with distinct online identities and separate machines where required by the backend.
 - Confirm remote PlayerStates contain valid legacy unique network IDs.
 - Check backend/session requirements, mute state, firewall, and platform permissions.
+
+### Audio is quiet or distorted
+
+- Confirm the startup log says `sample-rate=24000 Hz` and shows the configured Opus bitrate and complexity.
+- Raise **Playback Volume Multiplier** first. This changes received volume without clipping the sender's encoded microphone signal.
+- Keep **Microphone Input Gain** at `1.0` unless a Windows microphone recording is also quiet.
+- If the log reports `Voice servicing was delayed`, retest in Standalone or a packaged Development build with shader compilation and heavy Editor work stopped. A long game-thread stall also delays Unreal's legacy voice capture/packet service and cannot be repaired by bitrate alone.
+- Keep the game window focused and disable aggressive background CPU throttling during multi-window tests.
 
 ### Pressing T does nothing
 

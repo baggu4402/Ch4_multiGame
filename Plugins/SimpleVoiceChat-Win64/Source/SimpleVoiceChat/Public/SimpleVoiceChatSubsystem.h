@@ -60,9 +60,11 @@ public:
 private:
     void HandlePostLoadMap(UWorld* LoadedWorld);
     void HandleLocalPlayerAdded(ULocalPlayer* NewLocalPlayer);
+    void HandlePeriodicVoiceRefresh();
     void RefreshVoiceState();
     void StartRefreshTimer(UWorld* World);
     void StopRefreshTimer();
+    void ApplyRuntimeAudioSettings();
     bool ApplyMicrophoneState(bool bEnable);
 
     TUniquePtr<ISimpleVoiceBackend> VoiceBackend;
@@ -70,6 +72,8 @@ private:
     FDelegateHandle LocalPlayerAddedHandle;
     FTimerHandle RefreshTimerHandle;
     TWeakObjectPtr<UWorld> RefreshTimerWorld;
+    double LastPeriodicRefreshTimeSeconds = 0.0;
     bool bVoiceInitialized = false;
     bool bMicrophoneEnabled = false;
+    bool bRuntimeAudioSettingsApplied = false;
 };

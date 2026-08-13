@@ -3,6 +3,7 @@
 #include "Backends/OnlineSubsystemVoiceBackend.h"
 
 #include "Engine/GameInstance.h"
+#include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
@@ -14,6 +15,7 @@
 #include "OnlineSessionSettings.h"
 #include "SimpleVoiceChatLog.h"
 #include "SimpleVoiceChatSettings.h"
+#include "SimpleVoiceChatTalkerComponent.h"
 
 namespace
 {
@@ -40,6 +42,7 @@ bool FOnlineSubsystemVoiceBackend::Initialize(UWorld* World)
             ReleaseNullDirectIpVoiceSession();
             SessionInterface = MoveTemp(NewSessionInterface);
         }
+        ApplyEncoderQualitySettings(World);
         return true;
     }
 
@@ -52,6 +55,7 @@ bool FOnlineSubsystemVoiceBackend::Initialize(UWorld* World)
     VoiceInterface = MoveTemp(NewVoiceInterface);
     ValidIdentityUsers.Reset();
     bWarnedInvalidRemoteIdentity = false;
+    bEncoderQualitySettingsApplied = false;
 
     if (!VoiceInterface.IsValid())
     {
@@ -76,6 +80,7 @@ bool FOnlineSubsystemVoiceBackend::Initialize(UWorld* World)
         Log,
         TEXT("OnlineSubsystem voice backend ready: %s"),
         *OnlineSubsystem->GetSubsystemName().ToString());
+    ApplyEncoderQualitySettings(World);
     return true;
 }
 
@@ -89,6 +94,7 @@ void FOnlineSubsystemVoiceBackend::Shutdown()
     VoiceInterface.Reset();
     OnlineSubsystem = nullptr;
     bMicrophoneEnabled = false;
+    bEncoderQualitySettingsApplied = false;
     bWarnedVoiceUnavailable = false;
 }
 
@@ -245,6 +251,7 @@ void FOnlineSubsystemVoiceBackend::RefreshRemoteTalkers(UWorld* World)
 
         const FString TalkerKey = MakeRemoteTalkerKey(UniqueId);
         PresentRemoteTalkers.Add(TalkerKey);
+        EnsureManagedRemoteTalker(PlayerState, TalkerKey);
         if (RegisteredRemoteTalkers.Contains(TalkerKey))
         {
             continue;
@@ -280,10 +287,136 @@ void FOnlineSubsystemVoiceBackend::RefreshRemoteTalkers(UWorld* World)
             {
                 VoiceInterface->UnregisterRemoteTalker(*UniqueId);
             }
+            RemoveManagedRemoteTalker(It.Key());
             UE_LOG(LogSimpleVoiceChat, Log, TEXT("Unregistered remote talker: %s"), *It.Key());
             It.RemoveCurrent();
         }
     }
+
+    TArray<FString> StaleManagedTalkers;
+    for (const TPair<FString, TWeakObjectPtr<USimpleVoiceChatTalkerComponent>>& Pair : ManagedRemoteTalkers)
+    {
+        if (!PresentRemoteTalkers.Contains(Pair.Key))
+        {
+            StaleManagedTalkers.Add(Pair.Key);
+        }
+    }
+    for (const FString& TalkerKey : StaleManagedTalkers)
+    {
+        RemoveManagedRemoteTalker(TalkerKey);
+    }
+}
+
+void FOnlineSubsystemVoiceBackend::ApplyEncoderQualitySettings(UWorld* World)
+{
+    if (bEncoderQualitySettingsApplied || !World || !GEngine || !VoiceInterface.IsValid())
+    {
+        return;
+    }
+
+    const USimpleVoiceChatSettings* Settings = GetDefault<USimpleVoiceChatSettings>();
+    const int32 Bitrate = FMath::Clamp(Settings->EncoderBitrate, 6000, 64000);
+    const int32 Complexity = FMath::Clamp(Settings->EncoderComplexity, 0, 10);
+
+    const bool bVbrHandled = GEngine->Exec(
+        World,
+        Settings->bUseVariableBitrate ? TEXT("vcvbr 1") : TEXT("vcvbr 0"));
+    const bool bBitrateHandled = GEngine->Exec(
+        World,
+        *FString::Printf(TEXT("vcbitrate %d"), Bitrate));
+    const bool bComplexityHandled = GEngine->Exec(
+        World,
+        *FString::Printf(TEXT("vccomplexity %d"), Complexity));
+
+    bEncoderQualitySettingsApplied = true;
+    if (bVbrHandled && bBitrateHandled && bComplexityHandled)
+    {
+        UE_LOG(
+            LogSimpleVoiceChat,
+            Log,
+            TEXT("Opus quality applied: bitrate=%d bps, complexity=%d, VBR=%s"),
+            Bitrate,
+            Complexity,
+            Settings->bUseVariableBitrate ? TEXT("on") : TEXT("off"));
+    }
+    else
+    {
+        UE_LOG(
+            LogSimpleVoiceChat,
+            Warning,
+            TEXT("The active voice backend did not accept every Opus quality command; backend defaults remain in use"));
+    }
+}
+
+void FOnlineSubsystemVoiceBackend::EnsureManagedRemoteTalker(
+    APlayerState* PlayerState,
+    const FString& TalkerKey)
+{
+    if (!PlayerState)
+    {
+        return;
+    }
+
+    const USimpleVoiceChatSettings* Settings = GetDefault<USimpleVoiceChatSettings>();
+    if (TWeakObjectPtr<USimpleVoiceChatTalkerComponent>* ExistingManaged = ManagedRemoteTalkers.Find(TalkerKey))
+    {
+        if (USimpleVoiceChatTalkerComponent* Talker = ExistingManaged->Get())
+        {
+            Talker->SetPlaybackVolumeMultiplier(Settings->PlaybackVolumeMultiplier);
+            return;
+        }
+        ManagedRemoteTalkers.Remove(TalkerKey);
+    }
+
+    if (UVOIPTalker* ExistingTalker = PlayerState->FindComponentByClass<UVOIPTalker>())
+    {
+        if (USimpleVoiceChatTalkerComponent* ManagedTalker = Cast<USimpleVoiceChatTalkerComponent>(ExistingTalker))
+        {
+            ManagedTalker->SetPlaybackVolumeMultiplier(Settings->PlaybackVolumeMultiplier);
+            ManagedRemoteTalkers.Add(TalkerKey, ManagedTalker);
+        }
+        return;
+    }
+
+    USimpleVoiceChatTalkerComponent* Talker = NewObject<USimpleVoiceChatTalkerComponent>(
+        PlayerState,
+        USimpleVoiceChatTalkerComponent::StaticClass(),
+        TEXT("SimpleVoiceChatTalker"));
+    if (!Talker)
+    {
+        UE_LOG(LogSimpleVoiceChat, Warning, TEXT("Could not create playback controller for %s"), *TalkerKey);
+        return;
+    }
+
+    Talker->SetPlaybackVolumeMultiplier(Settings->PlaybackVolumeMultiplier);
+    PlayerState->AddInstanceComponent(Talker);
+    Talker->RegisterComponent();
+    Talker->RegisterWithPlayerState(PlayerState);
+    ManagedRemoteTalkers.Add(TalkerKey, Talker);
+}
+
+void FOnlineSubsystemVoiceBackend::RemoveManagedRemoteTalker(const FString& TalkerKey)
+{
+    if (TWeakObjectPtr<USimpleVoiceChatTalkerComponent>* ManagedTalker = ManagedRemoteTalkers.Find(TalkerKey))
+    {
+        if (USimpleVoiceChatTalkerComponent* Talker = ManagedTalker->Get())
+        {
+            Talker->DestroyComponent();
+        }
+        ManagedRemoteTalkers.Remove(TalkerKey);
+    }
+}
+
+void FOnlineSubsystemVoiceBackend::RemoveAllManagedRemoteTalkers()
+{
+    for (const TPair<FString, TWeakObjectPtr<USimpleVoiceChatTalkerComponent>>& Pair : ManagedRemoteTalkers)
+    {
+        if (USimpleVoiceChatTalkerComponent* Talker = Pair.Value.Get())
+        {
+            Talker->DestroyComponent();
+        }
+    }
+    ManagedRemoteTalkers.Reset();
 }
 
 void FOnlineSubsystemVoiceBackend::EnsureNullIdentityLogin(const int32 LocalUserNum)
@@ -487,6 +620,7 @@ void FOnlineSubsystemVoiceBackend::UnregisterRemoteTalkers()
         }
     }
     RegisteredRemoteTalkers.Reset();
+    RemoveAllManagedRemoteTalkers();
 }
 
 void FOnlineSubsystemVoiceBackend::ReleaseAllTalkers()
@@ -503,6 +637,7 @@ void FOnlineSubsystemVoiceBackend::ReleaseAllTalkers()
     else
     {
         RegisteredRemoteTalkers.Reset();
+        RemoveAllManagedRemoteTalkers();
     }
     RegisteredLocalTalkers.Reset();
 }
