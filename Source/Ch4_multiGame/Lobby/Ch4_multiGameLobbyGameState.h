@@ -31,6 +31,7 @@ public:
 	int32 GetMaxPlayerCount() const { return MaxPlayerCount; }
 
 protected:
+	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
@@ -40,6 +41,7 @@ private:
 	void OnRep_CurrentPlayerCount();
 
 	void BroadcastPlayerCountChanged();
+	void ShowClientDebugStatus() const;
 
 private:
 	UPROPERTY(ReplicatedUsing=OnRep_CurrentPlayerCount, BlueprintReadOnly, Category="Lobby", meta=(AllowPrivateAccess="true"))

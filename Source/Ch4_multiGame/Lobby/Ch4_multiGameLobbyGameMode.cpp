@@ -3,8 +3,12 @@
 #include "Lobby/Ch4_multiGameLobbyGameMode.h"
 
 #include "Ch4_multiGame.h"
+#include "Engine/Engine.h"
+#include "Engine/NetDriver.h"
+#include "Engine/World.h"
 #include "GameFramework/GameSession.h"
 #include "GameFramework/PlayerState.h"
+#include "IPAddress.h"
 #include "Lobby/Ch4_multiGameLobbyGameState.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -41,7 +45,23 @@ void ACh4_multiGameLobbyGameMode::InitGame(
 		GameSession->MaxPlayers = MaxLobbyPlayers;
 	}
 
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Initialized with a maximum of %d players"), MaxLobbyPlayers);
+	const bool bIsListenServer = GetNetMode() == NM_ListenServer;
+	const int32 ListenPort = GetListenPort();
+	const FString NetworkMode = bIsListenServer ? TEXT("LISTEN SERVER") : TEXT("STANDALONE");
+	const FString StartupMessage = bIsListenServer
+		? FString::Printf(
+			TEXT("%s READY | Port: %d | Client: open <HostHamachiIP>:%d"),
+			*NetworkMode,
+			ListenPort,
+			ListenPort)
+		: TEXT("STANDALONE ONLY | Clients cannot join | Run: open L_Lobby?listen");
+
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Lobby] %s | Map: %s | MaxPlayers: %d"),
+		*StartupMessage,
+		*MapName,
+		MaxLobbyPlayers);
+	ShowServerDebugStatus(StartupMessage, bIsListenServer ? FColor::Green : FColor::Red, 30.0f);
 }
 
 void ACh4_multiGameLobbyGameMode::InitGameState()
@@ -84,8 +104,22 @@ void ACh4_multiGameLobbyGameMode::PostLogin(APlayerController* NewPlayer)
 	}
 
 	UpdateLobbyPlayerCount(GetNumPlayers());
-	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Player Joined: %s"), *GetPlayerLogLabel(NewPlayer));
+	const FString PlayerLabel = GetPlayerLogLabel(NewPlayer);
+	const FString PawnLabel = GetNameSafe(NewPlayer->GetPawn());
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Lobby] Player Joined: %s | Pawn: %s | Possessed: %s"),
+		*PlayerLabel,
+		*PawnLabel,
+		NewPlayer->GetPawn() ? TEXT("YES") : TEXT("NO"));
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Players: %d / %d"), GetNumPlayers(), MaxLobbyPlayers);
+	ShowServerDebugStatus(
+		FString::Printf(
+			TEXT("PLAYER JOINED\nPlayers: %d / %d\nPawn: %s"),
+			GetNumPlayers(),
+			MaxLobbyPlayers,
+			NewPlayer->GetPawn() ? TEXT("OK") : TEXT("MISSING")),
+		NewPlayer->GetPawn() ? FColor::Green : FColor::Red,
+		12.0f);
 }
 
 void ACh4_multiGameLobbyGameMode::Logout(AController* Exiting)
@@ -106,6 +140,10 @@ void ACh4_multiGameLobbyGameMode::Logout(AController* Exiting)
 	UpdateLobbyPlayerCount(RemainingPlayerCount);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Player Left: %s"), *PlayerLabel);
 	UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Players: %d / %d"), RemainingPlayerCount, MaxLobbyPlayers);
+	ShowServerDebugStatus(
+		FString::Printf(TEXT("PLAYER LEFT\nPlayers: %d / %d"), RemainingPlayerCount, MaxLobbyPlayers),
+		FColor::Yellow,
+		10.0f);
 }
 
 ACh4_multiGameLobbyGameState* ACh4_multiGameLobbyGameMode::GetLobbyGameState() const
@@ -124,6 +162,37 @@ void ACh4_multiGameLobbyGameMode::UpdateLobbyPlayerCount(const int32 NewPlayerCo
 		UE_LOG(LogCh4_multiGame, Error,
 			TEXT("[Lobby] ACh4_multiGameLobbyGameState is not active. Check the Lobby GameMode assignment."));
 	}
+}
+
+void ACh4_multiGameLobbyGameMode::ShowServerDebugStatus(
+	const FString& EventMessage,
+	const FColor& Color,
+	const float Duration) const
+{
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, Duration, Color, FString::Printf(
+			TEXT("[LOBBY SERVER]\n%s"),
+			*EventMessage));
+	}
+}
+
+int32 ACh4_multiGameLobbyGameMode::GetListenPort() const
+{
+	if (const UWorld* World = GetWorld())
+	{
+		if (UNetDriver* NetDriver = World->GetNetDriver())
+		{
+			if (const TSharedPtr<const FInternetAddr> LocalAddress = NetDriver->GetLocalAddr())
+			{
+				return LocalAddress->GetPort();
+			}
+		}
+
+		return World->URL.Port;
+	}
+
+	return 0;
 }
 
 FString ACh4_multiGameLobbyGameMode::GetPlayerLogLabel(const AController* Controller) const
