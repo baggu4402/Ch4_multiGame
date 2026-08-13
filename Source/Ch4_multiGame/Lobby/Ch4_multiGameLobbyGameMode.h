@@ -25,6 +25,9 @@ public:
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
 
+	/** Accepts a Ready request from the owning lobby controller on the server. */
+	void HandlePlayerReady(APlayerController* RequestingPlayer);
+
 	UFUNCTION(BlueprintPure, Category="Lobby")
 	int32 GetMaxLobbyPlayers() const { return MaxLobbyPlayers; }
 
@@ -33,10 +36,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby", meta=(ClampMin="1", UIMin="1"))
 	int32 MaxLobbyPlayers = 4;
 
+	/** Verified package path for the existing gameplay map. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Travel")
+	FName GameplayMapPackage = TEXT("/Game/ThirdPerson/Lvl_ThirdPerson");
+
 private:
 	class ACh4_multiGameLobbyGameState* GetLobbyGameState() const;
 	void UpdateLobbyPlayerCount(int32 NewPlayerCount);
+	void CheckAllPlayersReady();
+	void GetReadyPlayerCounts(int32& OutReadyPlayers, int32& OutTotalPlayers) const;
+	void StartGameTravel();
 	void ShowServerDebugStatus(const FString& EventMessage, const FColor& Color, float Duration) const;
 	int32 GetListenPort() const;
 	FString GetPlayerLogLabel(const AController* Controller) const;
+
+	bool bTravelStarted = false;
 };
