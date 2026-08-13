@@ -9,22 +9,49 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "OnlineSubsystem.h"
+#include "OnlineSubsystemNames.h"
 #include "OnlineSubsystemUtils.h"
+#include "OnlineSessionSettings.h"
 #include "SimpleVoiceChatLog.h"
+#include "SimpleVoiceChatSettings.h"
+
+namespace
+{
+const FName NullDirectIpVoiceSessionName(TEXT("SimpleVoiceChatDirectIp"));
+}
 
 bool FOnlineSubsystemVoiceBackend::Initialize(UWorld* World)
 {
     IOnlineSubsystem* NewOnlineSubsystem = World ? Online::GetSubsystem(World) : nullptr;
+    IOnlineIdentityPtr NewIdentityInterface = NewOnlineSubsystem ? NewOnlineSubsystem->GetIdentityInterface() : nullptr;
+    IOnlineSessionPtr NewSessionInterface = NewOnlineSubsystem ? NewOnlineSubsystem->GetSessionInterface() : nullptr;
     IOnlineVoicePtr NewVoiceInterface = NewOnlineSubsystem ? NewOnlineSubsystem->GetVoiceInterface() : nullptr;
 
     if (OnlineSubsystem == NewOnlineSubsystem && VoiceInterface == NewVoiceInterface && VoiceInterface.IsValid())
     {
+        if (IdentityInterface != NewIdentityInterface)
+        {
+            ClearIdentityLoginDelegates();
+            IdentityInterface = MoveTemp(NewIdentityInterface);
+            ValidIdentityUsers.Reset();
+        }
+        if (SessionInterface != NewSessionInterface)
+        {
+            ReleaseNullDirectIpVoiceSession();
+            SessionInterface = MoveTemp(NewSessionInterface);
+        }
         return true;
     }
 
     ReleaseAllTalkers();
+    ClearIdentityLoginDelegates();
+    ReleaseNullDirectIpVoiceSession();
     OnlineSubsystem = NewOnlineSubsystem;
+    IdentityInterface = MoveTemp(NewIdentityInterface);
+    SessionInterface = MoveTemp(NewSessionInterface);
     VoiceInterface = MoveTemp(NewVoiceInterface);
+    ValidIdentityUsers.Reset();
+    bWarnedInvalidRemoteIdentity = false;
 
     if (!VoiceInterface.IsValid())
     {
@@ -55,6 +82,10 @@ bool FOnlineSubsystemVoiceBackend::Initialize(UWorld* World)
 void FOnlineSubsystemVoiceBackend::Shutdown()
 {
     ReleaseAllTalkers();
+    ClearIdentityLoginDelegates();
+    ReleaseNullDirectIpVoiceSession();
+    IdentityInterface.Reset();
+    SessionInterface.Reset();
     VoiceInterface.Reset();
     OnlineSubsystem = nullptr;
     bMicrophoneEnabled = false;
@@ -150,6 +181,8 @@ void FOnlineSubsystemVoiceBackend::RefreshLocalTalkers(UWorld* World)
 
         const uint32 LocalUserNum = static_cast<uint32>(ControllerId);
         PresentLocalUsers.Add(LocalUserNum);
+        EnsureNullIdentityLogin(ControllerId);
+        EnsureNullDirectIpVoiceSession(ControllerId);
         if (RegisteredLocalTalkers.Contains(LocalUserNum))
         {
             continue;
@@ -189,6 +222,7 @@ void FOnlineSubsystemVoiceBackend::RefreshRemoteTalkers(UWorld* World)
     }
 
     TSet<FString> PresentRemoteTalkers;
+    bool bHasInvalidRemoteIdentity = false;
     for (APlayerState* PlayerState : GameState->PlayerArray)
     {
         if (!IsValid(PlayerState) || PlayerState->IsInactive())
@@ -205,6 +239,7 @@ void FOnlineSubsystemVoiceBackend::RefreshRemoteTalkers(UWorld* World)
         const FUniqueNetIdRepl& UniqueId = PlayerState->GetUniqueId();
         if (!UniqueId.IsValid() || !UniqueId.IsV1())
         {
+            bHasInvalidRemoteIdentity = true;
             continue;
         }
 
@@ -226,6 +261,16 @@ void FOnlineSubsystemVoiceBackend::RefreshRemoteTalkers(UWorld* World)
         }
     }
 
+    if (bHasInvalidRemoteIdentity && !bWarnedInvalidRemoteIdentity)
+    {
+        UE_LOG(
+            LogSimpleVoiceChat,
+            Warning,
+            TEXT("A remote PlayerState has no valid legacy UniqueNetId. Voice cannot register that player. "
+                 "Complete identity login before opening a listen server or joining by IP, then reconnect."));
+    }
+    bWarnedInvalidRemoteIdentity = bHasInvalidRemoteIdentity;
+
     for (auto It = RegisteredRemoteTalkers.CreateIterator(); It; ++It)
     {
         if (!PresentRemoteTalkers.Contains(It.Key()))
@@ -239,6 +284,194 @@ void FOnlineSubsystemVoiceBackend::RefreshRemoteTalkers(UWorld* World)
             It.RemoveCurrent();
         }
     }
+}
+
+void FOnlineSubsystemVoiceBackend::EnsureNullIdentityLogin(const int32 LocalUserNum)
+{
+    const USimpleVoiceChatSettings* Settings = GetDefault<USimpleVoiceChatSettings>();
+    if (!Settings->bAutoLoginNullSubsystemForDirectIp
+        || !OnlineSubsystem
+        || OnlineSubsystem->GetSubsystemName() != NULL_SUBSYSTEM
+        || !IdentityInterface.IsValid())
+    {
+        return;
+    }
+
+    const FUniqueNetIdPtr ExistingId = IdentityInterface->GetUniquePlayerId(LocalUserNum);
+    if (IdentityInterface->GetLoginStatus(LocalUserNum) == ELoginStatus::LoggedIn
+        && ExistingId.IsValid()
+        && ExistingId->IsValid())
+    {
+        if (!ValidIdentityUsers.Contains(LocalUserNum))
+        {
+            ValidIdentityUsers.Add(LocalUserNum);
+            UE_LOG(
+                LogSimpleVoiceChat,
+                Log,
+                TEXT("NULL identity ready for local user %d: %s"),
+                LocalUserNum,
+                *ExistingId->ToDebugString());
+        }
+        return;
+    }
+
+    if (IdentityLoginDelegateHandles.Contains(LocalUserNum))
+    {
+        return;
+    }
+
+    const FDelegateHandle LoginHandle = IdentityInterface->AddOnLoginCompleteDelegate_Handle(
+        LocalUserNum,
+        FOnLoginCompleteDelegate::CreateRaw(this, &FOnlineSubsystemVoiceBackend::HandleIdentityLoginComplete));
+    IdentityLoginDelegateHandles.Add(LocalUserNum, LoginHandle);
+
+    UE_LOG(LogSimpleVoiceChat, Log, TEXT("Starting NULL identity auto-login for local user %d"), LocalUserNum);
+    if (!IdentityInterface->AutoLogin(LocalUserNum))
+    {
+        if (const FDelegateHandle* StoredHandle = IdentityLoginDelegateHandles.Find(LocalUserNum))
+        {
+            FDelegateHandle MutableHandle = *StoredHandle;
+            IdentityInterface->ClearOnLoginCompleteDelegate_Handle(LocalUserNum, MutableHandle);
+        }
+        IdentityLoginDelegateHandles.Remove(LocalUserNum);
+        UE_LOG(LogSimpleVoiceChat, Warning, TEXT("NULL identity auto-login could not start for local user %d"), LocalUserNum);
+    }
+}
+
+void FOnlineSubsystemVoiceBackend::HandleIdentityLoginComplete(
+    const int32 LocalUserNum,
+    const bool bWasSuccessful,
+    const FUniqueNetId& UserId,
+    const FString& Error)
+{
+    if (IdentityInterface.IsValid())
+    {
+        if (const FDelegateHandle* LoginHandle = IdentityLoginDelegateHandles.Find(LocalUserNum))
+        {
+            FDelegateHandle MutableHandle = *LoginHandle;
+            IdentityInterface->ClearOnLoginCompleteDelegate_Handle(LocalUserNum, MutableHandle);
+        }
+    }
+    IdentityLoginDelegateHandles.Remove(LocalUserNum);
+
+    if (bWasSuccessful && UserId.IsValid())
+    {
+        ValidIdentityUsers.Add(LocalUserNum);
+        UE_LOG(
+            LogSimpleVoiceChat,
+            Log,
+            TEXT("NULL identity auto-login succeeded for local user %d: %s"),
+            LocalUserNum,
+            *UserId.ToDebugString());
+        return;
+    }
+
+    UE_LOG(
+        LogSimpleVoiceChat,
+        Warning,
+        TEXT("NULL identity auto-login failed for local user %d: %s"),
+        LocalUserNum,
+        Error.IsEmpty() ? TEXT("Unknown error") : *Error);
+}
+
+void FOnlineSubsystemVoiceBackend::ClearIdentityLoginDelegates()
+{
+    if (IdentityInterface.IsValid())
+    {
+        for (const TPair<int32, FDelegateHandle>& DelegatePair : IdentityLoginDelegateHandles)
+        {
+            FDelegateHandle MutableHandle = DelegatePair.Value;
+            IdentityInterface->ClearOnLoginCompleteDelegate_Handle(DelegatePair.Key, MutableHandle);
+        }
+    }
+    IdentityLoginDelegateHandles.Reset();
+}
+
+void FOnlineSubsystemVoiceBackend::EnsureNullDirectIpVoiceSession(const int32 LocalUserNum)
+{
+    const USimpleVoiceChatSettings* Settings = GetDefault<USimpleVoiceChatSettings>();
+    if (!Settings->bAutoCreateNullVoiceSessionForDirectIp
+        || !OnlineSubsystem
+        || OnlineSubsystem->GetSubsystemName() != NULL_SUBSYSTEM
+        || !SessionInterface.IsValid()
+        || SessionInterface->GetNumSessions() > 0
+        || bNullVoiceSessionCreationPending)
+    {
+        return;
+    }
+
+    CreateSessionCompleteDelegateHandle = SessionInterface->AddOnCreateSessionCompleteDelegate_Handle(
+        FOnCreateSessionCompleteDelegate::CreateRaw(
+            this,
+            &FOnlineSubsystemVoiceBackend::HandleNullVoiceSessionCreated));
+    bNullVoiceSessionCreationPending = true;
+
+    FOnlineSessionSettings VoiceSessionSettings;
+    VoiceSessionSettings.NumPublicConnections = 0;
+    VoiceSessionSettings.NumPrivateConnections = 0;
+    VoiceSessionSettings.bShouldAdvertise = false;
+    VoiceSessionSettings.bAllowJoinInProgress = false;
+    VoiceSessionSettings.bIsLANMatch = false;
+    VoiceSessionSettings.bUsesPresence = false;
+    VoiceSessionSettings.bUseLobbiesIfAvailable = false;
+    VoiceSessionSettings.bUseLobbiesVoiceChatIfAvailable = false;
+
+    UE_LOG(LogSimpleVoiceChat, Log, TEXT("Creating private NULL voice session for direct-IP testing"));
+    if (!SessionInterface->CreateSession(LocalUserNum, NullDirectIpVoiceSessionName, VoiceSessionSettings))
+    {
+        FDelegateHandle MutableHandle = CreateSessionCompleteDelegateHandle;
+        SessionInterface->ClearOnCreateSessionCompleteDelegate_Handle(MutableHandle);
+        CreateSessionCompleteDelegateHandle.Reset();
+        bNullVoiceSessionCreationPending = false;
+        UE_LOG(LogSimpleVoiceChat, Warning, TEXT("Could not create the private NULL voice session"));
+    }
+}
+
+void FOnlineSubsystemVoiceBackend::HandleNullVoiceSessionCreated(
+    const FName SessionName,
+    const bool bWasSuccessful)
+{
+    if (SessionInterface.IsValid() && CreateSessionCompleteDelegateHandle.IsValid())
+    {
+        FDelegateHandle MutableHandle = CreateSessionCompleteDelegateHandle;
+        SessionInterface->ClearOnCreateSessionCompleteDelegate_Handle(MutableHandle);
+    }
+    CreateSessionCompleteDelegateHandle.Reset();
+    bNullVoiceSessionCreationPending = false;
+
+    if (SessionName != NullDirectIpVoiceSessionName)
+    {
+        return;
+    }
+
+    bOwnsNullDirectIpVoiceSession = bWasSuccessful;
+    if (bWasSuccessful)
+    {
+        UE_LOG(LogSimpleVoiceChat, Log, TEXT("Private NULL voice session ready"));
+    }
+    else
+    {
+        UE_LOG(LogSimpleVoiceChat, Warning, TEXT("Private NULL voice session creation failed"));
+    }
+}
+
+void FOnlineSubsystemVoiceBackend::ReleaseNullDirectIpVoiceSession()
+{
+    if (SessionInterface.IsValid() && CreateSessionCompleteDelegateHandle.IsValid())
+    {
+        FDelegateHandle MutableHandle = CreateSessionCompleteDelegateHandle;
+        SessionInterface->ClearOnCreateSessionCompleteDelegate_Handle(MutableHandle);
+    }
+    CreateSessionCompleteDelegateHandle.Reset();
+    bNullVoiceSessionCreationPending = false;
+
+    if (SessionInterface.IsValid()
+        && bOwnsNullDirectIpVoiceSession
+        && SessionInterface->GetNamedSession(NullDirectIpVoiceSessionName))
+    {
+        SessionInterface->DestroySession(NullDirectIpVoiceSessionName);
+    }
+    bOwnsNullDirectIpVoiceSession = false;
 }
 
 void FOnlineSubsystemVoiceBackend::UnregisterRemoteTalkers()

@@ -110,6 +110,8 @@ Open **Project Settings > Plugins > Simple Voice Chat**:
 - **Enable Automatic Toggle Key**: enables the focus-safe Slate key listener.
 - **Toggle Key**: defaults to `T`.
 - **Microphone Enabled On Start**: defaults to false and should remain opt-in for privacy.
+- **Auto Login Null Subsystem For Direct IP**: defaults to true and creates a temporary NULL identity before direct-IP testing. It never logs in Steam or another provider.
+- **Auto Create Null Voice Session For Direct IP**: defaults to true and creates a non-advertised local marker session only when NULL has no existing session. Unreal's legacy NULL voice implementation requires one before it accepts remote talkers.
 
 The defaults are stored in `Config/DefaultSimpleVoiceChat.ini`. A host project can override them in its own config without editing plugin source.
 
@@ -138,9 +140,13 @@ For a direct-IP test, first confirm gameplay replication, then check for:
 
 ```text
 LogSimpleVoiceChat: OnlineSubsystem voice backend ready: <BackendName>
+LogSimpleVoiceChat: NULL identity auto-login succeeded for local user 0: ...
+LogSimpleVoiceChat: Private NULL voice session ready
 LogSimpleVoiceChat: Registered local talker 0
 LogSimpleVoiceChat: Registered remote talker: ...
 ```
+
+The identity-success line must appear **before** opening the listen server or joining the host. If a connection log contains `UniqueId: INVALID`, disconnect, wait for identity success, and reconnect.
 
 If `IsVoiceAvailable()` is false or the log reports that voice is unavailable, changing Hamachi ports alone will not fix the missing voice backend.
 

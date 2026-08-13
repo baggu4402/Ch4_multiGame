@@ -4,6 +4,8 @@
 
 #include "ISimpleVoiceBackend.h"
 #include "GameFramework/OnlineReplStructs.h"
+#include "Interfaces/OnlineIdentityInterface.h"
+#include "Interfaces/OnlineSessionInterface.h"
 #include "Interfaces/VoiceInterface.h"
 
 class IOnlineSubsystem;
@@ -24,15 +26,29 @@ public:
 private:
     void RefreshLocalTalkers(UWorld* World);
     void RefreshRemoteTalkers(UWorld* World);
+    void EnsureNullIdentityLogin(int32 LocalUserNum);
+    void HandleIdentityLoginComplete(int32 LocalUserNum, bool bWasSuccessful, const FUniqueNetId& UserId, const FString& Error);
+    void ClearIdentityLoginDelegates();
+    void EnsureNullDirectIpVoiceSession(int32 LocalUserNum);
+    void HandleNullVoiceSessionCreated(FName SessionName, bool bWasSuccessful);
+    void ReleaseNullDirectIpVoiceSession();
     void UnregisterRemoteTalkers();
     void ReleaseAllTalkers();
     void ApplyMicrophoneStateToLocalTalker(uint32 LocalUserNum) const;
     static FString MakeRemoteTalkerKey(const FUniqueNetIdRepl& UniqueId);
 
     IOnlineSubsystem* OnlineSubsystem = nullptr;
+    IOnlineIdentityPtr IdentityInterface;
+    IOnlineSessionPtr SessionInterface;
     IOnlineVoicePtr VoiceInterface;
+    TMap<int32, FDelegateHandle> IdentityLoginDelegateHandles;
+    FDelegateHandle CreateSessionCompleteDelegateHandle;
+    TSet<int32> ValidIdentityUsers;
     TSet<uint32> RegisteredLocalTalkers;
     TMap<FString, FUniqueNetIdRepl> RegisteredRemoteTalkers;
     bool bMicrophoneEnabled = false;
     bool bWarnedVoiceUnavailable = false;
+    bool bWarnedInvalidRemoteIdentity = false;
+    bool bNullVoiceSessionCreationPending = false;
+    bool bOwnsNullDirectIpVoiceSession = false;
 };

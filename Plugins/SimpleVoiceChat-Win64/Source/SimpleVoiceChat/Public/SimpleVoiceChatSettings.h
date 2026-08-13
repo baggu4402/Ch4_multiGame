@@ -35,4 +35,18 @@ public:
     /** Privacy-safe default is off. */
     UPROPERTY(Config, EditAnywhere, Category="Voice")
     bool bMicrophoneEnabledOnStart = false;
+
+    /**
+     * Creates a temporary local identity when using OnlineSubsystem NULL for direct-IP testing.
+     * Other OnlineSubsystem providers are never logged in by this option.
+     */
+    UPROPERTY(Config, EditAnywhere, Category="Testing")
+    bool bAutoLoginNullSubsystemForDirectIp = true;
+
+    /**
+     * Creates a private, non-advertised NULL session so Unreal's legacy voice interface can
+     * register remote talkers during direct-IP tests. Existing game sessions are reused.
+     */
+    UPROPERTY(Config, EditAnywhere, Category="Testing")
+    bool bAutoCreateNullVoiceSessionForDirectIp = true;
 };

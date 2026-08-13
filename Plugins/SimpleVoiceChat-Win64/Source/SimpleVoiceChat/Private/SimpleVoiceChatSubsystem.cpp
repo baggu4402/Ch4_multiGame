@@ -15,6 +15,13 @@ void USimpleVoiceChatSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
 
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        LocalPlayerAddedHandle = GameInstance->OnLocalPlayerAddedEvent.AddUObject(
+            this,
+            &USimpleVoiceChatSubsystem::HandleLocalPlayerAdded);
+    }
+
     PostLoadMapHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(
         this,
         &USimpleVoiceChatSubsystem::HandlePostLoadMap);
@@ -36,6 +43,15 @@ void USimpleVoiceChatSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void USimpleVoiceChatSubsystem::Deinitialize()
 {
+    if (LocalPlayerAddedHandle.IsValid())
+    {
+        if (UGameInstance* GameInstance = GetGameInstance())
+        {
+            GameInstance->OnLocalPlayerAddedEvent.Remove(LocalPlayerAddedHandle);
+        }
+        LocalPlayerAddedHandle.Reset();
+    }
+
     if (PostLoadMapHandle.IsValid())
     {
         FCoreUObjectDelegates::PostLoadMapWithWorld.Remove(PostLoadMapHandle);
@@ -133,6 +149,12 @@ void USimpleVoiceChatSubsystem::HandlePostLoadMap(UWorld* LoadedWorld)
         VoiceBackend->HandleWorldChanged(LoadedWorld);
     }
     StartRefreshTimer(LoadedWorld);
+    RefreshVoiceState();
+}
+
+void USimpleVoiceChatSubsystem::HandleLocalPlayerAdded(ULocalPlayer* NewLocalPlayer)
+{
+    // This runs early enough for NULL identity creation to precede a later direct-IP connection.
     RefreshVoiceState();
 }
 

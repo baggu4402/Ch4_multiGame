@@ -8,6 +8,8 @@
 #include "TimerManager.h"
 #include "SimpleVoiceChatSubsystem.generated.h"
 
+class ULocalPlayer;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSimpleMicrophoneStateChanged, bool, bIsEnabled);
 
 /**
@@ -57,6 +59,7 @@ public:
 
 private:
     void HandlePostLoadMap(UWorld* LoadedWorld);
+    void HandleLocalPlayerAdded(ULocalPlayer* NewLocalPlayer);
     void RefreshVoiceState();
     void StartRefreshTimer(UWorld* World);
     void StopRefreshTimer();
@@ -64,6 +67,7 @@ private:
 
     TUniquePtr<ISimpleVoiceBackend> VoiceBackend;
     FDelegateHandle PostLoadMapHandle;
+    FDelegateHandle LocalPlayerAddedHandle;
     FTimerHandle RefreshTimerHandle;
     TWeakObjectPtr<UWorld> RefreshTimerWorld;
     bool bVoiceInitialized = false;
