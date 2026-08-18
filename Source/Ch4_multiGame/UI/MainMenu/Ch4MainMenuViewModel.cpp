@@ -117,7 +117,14 @@ void UCh4MainMenuViewModel::QuitGame()
 // Private Setters (MVVM 내부 규칙)
 void UCh4MainMenuViewModel::SetCurrentPanel(EMenuPanel NewPanel)
 {
-	UE_MVVM_SET_PROPERTY_VALUE(CurrentPanel, NewPanel);
+	if (CurrentPanel != NewPanel)
+	{
+		CurrentPanel = NewPanel;
+		UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(CurrentPanel);
+		UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(MainPanelVisibility);
+		UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(RoomSelectionVisibility);
+		UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(RoomListVisibility);
+	}
 }
 
 void UCh4MainMenuViewModel::SetStatusText(FText NewText)
@@ -127,5 +134,10 @@ void UCh4MainMenuViewModel::SetStatusText(FText NewText)
 
 void UCh4MainMenuViewModel::SetbIsLoading(bool bNewIsLoading)
 {
-	UE_MVVM_SET_PROPERTY_VALUE(bIsLoading, bNewIsLoading);
+	if (bIsLoading != bNewIsLoading)
+	{
+		bIsLoading = bNewIsLoading;
+		UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bIsLoading);
+		UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bCanInteract);
+	}
 }
