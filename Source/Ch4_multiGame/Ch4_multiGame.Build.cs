@@ -18,7 +18,9 @@ public class Ch4_multiGame : ModuleRules
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"UMG",
-			"Slate"
+			"Slate",
+			"ModelViewViewModel",
+			"OnlineSubsystem",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
@@ -37,7 +39,8 @@ public class Ch4_multiGame : ModuleRules
 			"Ch4_multiGame/Variant_SideScrolling/AI",
 			"Ch4_multiGame/Variant_SideScrolling/Gameplay",
 			"Ch4_multiGame/Variant_SideScrolling/Interfaces",
-			"Ch4_multiGame/Variant_SideScrolling/UI"
+			"Ch4_multiGame/Variant_SideScrolling/UI",
+			"Ch4_multiGame/UI/MainMenu",
 		});
 
 		// Uncomment if you are using Slate UI
