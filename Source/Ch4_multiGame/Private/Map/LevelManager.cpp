@@ -13,13 +13,16 @@ void ALevelManager::BeginPlay()
 {
 	Super::BeginPlay();
 	
-	if (HasAuthority() && bUseAutoArrange)
+	if (HasAuthority())
 	{
-		ArrangePlacedZones();
-	}
-	else
-	{
-		UE_LOG(LogTemp, Log, TEXT("ZoneManager: 자동 배치가 비활성화되었습니다. 레벨 에디터 배치를 사용합니다."));
+		if (bUseAutoArrange)
+		{
+			ArrangePlacedZones();	
+		}
+		else
+		{
+			UE_LOG(LogTemp,Warning,TEXT("자동 배치 OFF 에디터 레벨내 배치를 사용합니다"))
+		}	
 	}
 }
 
