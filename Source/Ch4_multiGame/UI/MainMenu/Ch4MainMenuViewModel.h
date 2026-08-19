@@ -79,6 +79,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Menu|Session")
 	void SelectRoom(int32 Index);
 	
+	UFUNCTION(BlueprintCallable, Category = "Menu|Session")
+	void SelectRoomEntry(UCh4RoomEntryData* RoomEntry);
+	
 	// [방 참가] 버튼 -> 선택한 방으로 접속
 	UFUNCTION(BlueprintCallable, Category = "Menu|Session")
 	void JoinSelectedRoom();

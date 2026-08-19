@@ -139,7 +139,7 @@ void UCh4MainMenuViewModel::FindRooms()
 	SearchSettings = MakeShareable(new FOnlineSessionSearch());
 	SearchSettings->bIsLanQuery = true;		// LAN 검색 (Steam 전환 시 false로 변경)
 	SearchSettings->MaxSearchResults = 20;
-	SearchSettings->TimeoutInSeconds = 5.0f; // LAN 검색 5초 대기 (로컬 패킷 수신 안정화)
+	SearchSettings->TimeoutInSeconds = 1.5f; // LAN 검색 1.5초로 단축 (빠른 방 목록 로딩)
 	
 	// 검색 완료 콜백 등록 (구독)
 	Session->OnFindSessionsCompleteDelegates.AddUObject(
@@ -193,17 +193,26 @@ void UCh4MainMenuViewModel::OnFindSessionsComplete(bool bWasSuccessful)
 		RoomList.Add(NewEntry);
 	}
 	
-	// UI에 방 목록 갱신 알림 방송
-	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(RoomList);
-	
+	// [1인 로컬 테스트 지원]: 실제 검색된 방이 없을 때 로컬 테스트 방 생성
 	if (ResultCount == 0)
 	{
-		SetStatusText(NSLOCTEXT("Ch4MainMenu", "NoRooms", "No rooms found."));
+		UCh4RoomEntryData* LocalEntry = NewObject<UCh4RoomEntryData>(this);
+		LocalEntry->ServerName = TEXT("Local Test Server (Host)");
+		LocalEntry->MaxPlayers = 4;
+		LocalEntry->CurrentPlayers = 1;
+		LocalEntry->PingInMs = 5;
+		LocalEntry->SearchResultIndex = -999; // 로컬 테스트 전용 플래그
+		RoomList.Add(LocalEntry);
+		
+		SetStatusText(NSLOCTEXT("Ch4MainMenu", "LocalRoomReady", "Found 1 local test room."));
 	}
 	else
 	{
 		SetStatusText(FText::Format(NSLOCTEXT("Ch4MainMenu", "RoomsFound", "Found {0} room(s)"), FText::AsNumber(ResultCount)));
 	}
+	
+	// UI에 방 목록 갱신 알림 방송
+	UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(RoomList);
 }
 
 // --------------------------------------
@@ -212,9 +221,49 @@ void UCh4MainMenuViewModel::OnFindSessionsComplete(bool bWasSuccessful)
 
 void UCh4MainMenuViewModel::SelectRoom(int32 Index)
 {
-	if (RoomList.IsValidIndex(Index))
+	int32 FoundIdx = -1;
+	if (Index == -999 && RoomList.Num() > 0)
 	{
-		SelectedRoomIndex = Index;
+		FoundIdx = 0;
+	}
+	else if (RoomList.IsValidIndex(Index))
+	{
+		FoundIdx = Index;
+	}
+	else
+	{
+		for (int32 i = 0; i < RoomList.Num(); ++i)
+		{
+			if (RoomList[i] && RoomList[i]->SearchResultIndex == Index)
+			{
+				FoundIdx = i;
+				break;
+			}
+		}
+	}
+	
+	if (RoomList.IsValidIndex(FoundIdx))
+	{
+		SelectedRoomIndex = FoundIdx;
+		SetbCanJoinRoom(true);
+	}
+	else
+	{
+		SelectedRoomIndex = -1;
+		SetbCanJoinRoom(false);
+	}
+}
+
+void UCh4MainMenuViewModel::SelectRoomEntry(UCh4RoomEntryData* RoomEntry)
+{
+	if (RoomEntry && RoomList.Contains(RoomEntry))
+	{
+		SelectedRoomIndex = RoomList.IndexOfByKey(RoomEntry);
+		SetbCanJoinRoom(true);
+	}
+	else if (RoomEntry && RoomList.Num() > 0)
+	{
+		SelectedRoomIndex = 0;
 		SetbCanJoinRoom(true);
 	}
 	else
@@ -226,15 +275,34 @@ void UCh4MainMenuViewModel::SelectRoom(int32 Index)
 
 void UCh4MainMenuViewModel::JoinSelectedRoom()
 {
-	if (!SearchSettings.IsValid() || !RoomList.IsValidIndex(SelectedRoomIndex))
+	if (!RoomList.IsValidIndex(SelectedRoomIndex))
 	{
 		SetStatusText(NSLOCTEXT("Ch4MainMenu", "NoRoomsSelected", "Please select a room to join."));
 		return;
 	}
 	
 	int32 TargetResultIdx = RoomList[SelectedRoomIndex]->SearchResultIndex;
-	if (!SearchSettings->SearchResults.IsValidIndex(TargetResultIdx))
+	
+	// [1인 로컬 테스트 접속]: TargetResultIdx가 -999이면 로컬 호스트(127.0.0.1:7777)로 바로 접속
+	if (TargetResultIdx == -999)
 	{
+		SetbIsLoading(true);
+		SetStatusText(NSLOCTEXT("Ch4MainMenu", "JoiningLocal", "Joining local room..."));
+		
+		if (UWorld* World = GetWorld())
+		{
+			if (APlayerController* PC = World->GetFirstPlayerController())
+			{
+				PC->ClientTravel(TEXT("127.0.0.1:7777"), TRAVEL_Absolute);
+				return;
+			}
+		}
+	}
+	
+	// 실제 네트워크 세션 접속
+	if (!SearchSettings.IsValid() || !SearchSettings->SearchResults.IsValidIndex(TargetResultIdx))
+	{
+		SetStatusText(NSLOCTEXT("Ch4MainMenu", "InvalidRoom", "Invalid room selected."));
 		return;
 	}
 	
