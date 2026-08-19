@@ -3,10 +3,12 @@
 #include "Lobby/Ch4_multiGameLobbyGameMode.h"
 
 #include "Ch4_multiGame.h"
+#include "EngineUtils.h"
 #include "Engine/Engine.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "GameFramework/GameSession.h"
+#include "GameFramework/PlayerStart.h"
 #include "GameFramework/PlayerState.h"
 #include "IPAddress.h"
 #include "Lobby/Ch4_multiGameLobbyGameState.h"
@@ -38,7 +40,8 @@ void ACh4_multiGameLobbyGameMode::InitGame(
 {
 	Super::InitGame(MapName, Options, ErrorMessage);
 
-	MaxLobbyPlayers = FMath::Max(MaxLobbyPlayers, 1);
+	MaxLobbyPlayers = FMath::Max(MaxLobbyPlayers, 2);
+	MinPlayersToStart = FMath::Clamp(MinPlayersToStart, 2, MaxLobbyPlayers);
 	if (GameSession)
 	{
 		// AGameSession::ApproveLogin uses this value before Login/PostLogin.
@@ -57,10 +60,22 @@ void ACh4_multiGameLobbyGameMode::InitGame(
 		: TEXT("STANDALONE ONLY | Clients cannot join | Run: open L_Lobby?listen");
 
 	UE_LOG(LogCh4_multiGame, Log,
-		TEXT("[Lobby] %s | Map: %s | MaxPlayers: %d"),
+		TEXT("[Lobby] %s | Map: %s | Players: %d-%d"),
 		*StartupMessage,
 		*MapName,
+		MinPlayersToStart,
 		MaxLobbyPlayers);
+
+	if (bIsListenServer)
+	{
+		const UNetDriver* NetDriver = GetWorld() ? GetWorld()->GetNetDriver() : nullptr;
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Listen Server started"));
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Listening Port: %d"), ListenPort);
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[Lobby] GameNetDriver: %s | DriverClass: %s"),
+			*GetNameSafe(NetDriver),
+			NetDriver ? *NetDriver->GetClass()->GetPathName() : TEXT("Unavailable"));
+	}
 	ShowServerDebugStatus(StartupMessage, bIsListenServer ? FColor::Green : FColor::Red, 30.0f);
 }
 
@@ -70,12 +85,46 @@ void ACh4_multiGameLobbyGameMode::InitGameState()
 	UpdateLobbyPlayerCount(GetNumPlayers());
 }
 
+void ACh4_multiGameLobbyGameMode::StartPlay()
+{
+	Super::StartPlay();
+
+	int32 PlayerStartCount = 0;
+	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
+	{
+		++PlayerStartCount;
+	}
+
+	const bool bHasEnoughPlayerStarts = PlayerStartCount >= MaxLobbyPlayers;
+	if (bHasEnoughPlayerStarts)
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[Lobby] PlayerStarts: %d / %d | Distinct four-player spawns: READY"),
+			PlayerStartCount,
+			MaxLobbyPlayers);
+	}
+	else
+	{
+		UE_LOG(LogCh4_multiGame, Warning,
+			TEXT("[Lobby] PlayerStarts: %d / %d | Distinct four-player spawns: CHECK MAP"),
+			PlayerStartCount,
+			MaxLobbyPlayers);
+	}
+}
+
 void ACh4_multiGameLobbyGameMode::PreLogin(
 	const FString& Options,
 	const FString& Address,
 	const FUniqueNetIdRepl& UniqueId,
 	FString& ErrorMessage)
 {
+	const int32 CurrentPlayers = GetNumPlayers();
+	UE_LOG(LogCh4_multiGame, Log,
+		TEXT("[Lobby] PreLogin request | Current Players: %d / %d | Traveling: %s"),
+		CurrentPlayers,
+		MaxLobbyPlayers,
+		bTravelStarted ? TEXT("YES") : TEXT("NO"));
+
 	Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
 
 	if (ErrorMessage.IsEmpty() && GetNumPlayers() >= MaxLobbyPlayers)
@@ -90,9 +139,15 @@ void ACh4_multiGameLobbyGameMode::PreLogin(
 	if (!ErrorMessage.IsEmpty())
 	{
 		UE_LOG(LogCh4_multiGame, Warning,
-			TEXT("[Lobby] Connection Rejected from %s: %s Players: %d / %d"),
-			*Address,
+			TEXT("[Lobby] Player Rejected | Reason: %s | Players: %d / %d"),
 			*ErrorMessage,
+			GetNumPlayers(),
+			MaxLobbyPlayers);
+	}
+	else
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[Lobby] Player Accepted | Players before Login: %d / %d"),
 			GetNumPlayers(),
 			MaxLobbyPlayers);
 	}
@@ -223,12 +278,22 @@ void ACh4_multiGameLobbyGameMode::CheckAllPlayersReady()
 		TEXT("[Lobby] Ready Players: %d / %d"),
 		ReadyPlayers,
 		TotalPlayers);
+	const bool bHasMinimumPlayers = TotalPlayers >= MinPlayersToStart;
 	ShowServerDebugStatus(
 		FString::Printf(TEXT("READY PLAYERS: %d / %d"), ReadyPlayers, TotalPlayers),
-		ReadyPlayers == TotalPlayers && TotalPlayers > 0 ? FColor::Green : FColor::Cyan,
+		bHasMinimumPlayers && ReadyPlayers == TotalPlayers ? FColor::Green : FColor::Cyan,
 		8.0f);
 
-	if (TotalPlayers > 0 && ReadyPlayers == TotalPlayers)
+	if (!bHasMinimumPlayers)
+	{
+		UE_LOG(LogCh4_multiGame, Log,
+			TEXT("[Lobby] Waiting for players before travel: %d / %d minimum"),
+			TotalPlayers,
+			MinPlayersToStart);
+		return;
+	}
+
+	if (ReadyPlayers == TotalPlayers)
 	{
 		UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] All Players Ready"));
 		StartGameTravel();
