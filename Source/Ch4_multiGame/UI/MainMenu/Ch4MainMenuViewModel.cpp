@@ -72,7 +72,9 @@ void UCh4MainMenuViewModel::HostGame()
 	HostSettings.bShouldAdvertise = true;		// 다른 사람에게 방 검색 허용
 	HostSettings.bUsesPresence = false;
 	HostSettings.bAllowJoinInProgress = true;
+	HostSettings.bAllowJoinViaPresence = false;
 	HostSettings.NumPublicConnections = 4;		// 최대 4명
+	HostSettings.Set(FName(TEXT("MAPNAME")), FString(TEXT("L_Lobby")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	
 	Session->OnCreateSessionCompleteDelegates.AddUObject(
 		this, &UCh4MainMenuViewModel::OnCreateSessionComplete);
@@ -137,7 +139,7 @@ void UCh4MainMenuViewModel::FindRooms()
 	SearchSettings = MakeShareable(new FOnlineSessionSearch());
 	SearchSettings->bIsLanQuery = true;		// LAN 검색 (Steam 전환 시 false로 변경)
 	SearchSettings->MaxSearchResults = 20;
-	SearchSettings->TimeoutInSeconds = 2.0f; // LAN 검색 2초 제한
+	SearchSettings->TimeoutInSeconds = 5.0f; // LAN 검색 5초 대기 (로컬 패킷 수신 안정화)
 	
 	// 검색 완료 콜백 등록 (구독)
 	Session->OnFindSessionsCompleteDelegates.AddUObject(
