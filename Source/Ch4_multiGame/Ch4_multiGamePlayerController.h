@@ -17,7 +17,15 @@ UCLASS(abstract)
 class ACh4_multiGamePlayerController : public APlayerController
 {
 	GENERATED_BODY()
-	
+
+public:
+	/**
+	 * Safe development command for Hamachi direct-IP tests.
+	 * Usage: JoinHamachi 25.x.x.x (an optional :7777 suffix is accepted).
+	 */
+	UFUNCTION(Exec, BlueprintCallable, Category="Network|Debug")
+	void JoinHamachi(FString HostIPv4);
+
 protected:
 
 	/** Input Mapping Contexts */

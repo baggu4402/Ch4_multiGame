@@ -1,5 +1,6 @@
 #include "UI/MainMenu/Ch4MainMenuViewModel.h"
 
+#include "Ch4_multiGame.h"
 #include "OnlineSessionSettings.h"
 #include "OnlineSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"
@@ -15,7 +16,11 @@ void UCh4MainMenuViewModel::ShowRoomSelection()
 		IOnlineSessionPtr Session = Subsystem->GetSessionInterface();
 		if (Session.IsValid())
 		{
-			Session->CancelFindSessions();
+			if (SearchSettings.IsValid() &&
+				SearchSettings->SearchState == EOnlineAsyncTaskState::InProgress)
+			{
+				Session->CancelFindSessions();
+			}
 			Session->OnFindSessionsCompleteDelegates.RemoveAll(this);
 		}
 	}
@@ -32,7 +37,11 @@ void UCh4MainMenuViewModel::ShowMainMenu()
 		IOnlineSessionPtr Session = Subsystem->GetSessionInterface();
 		if (Session.IsValid())
 		{
-			Session->CancelFindSessions();
+			if (SearchSettings.IsValid() &&
+				SearchSettings->SearchState == EOnlineAsyncTaskState::InProgress)
+			{
+				Session->CancelFindSessions();
+			}
 			Session->OnFindSessionsCompleteDelegates.RemoveAll(this);
 		}
 	}
@@ -113,6 +122,12 @@ void UCh4MainMenuViewModel::OnCreateSessionComplete(FName SessionName, bool bWas
 
 void UCh4MainMenuViewModel::FindRooms()
 {
+	if (bIsLoading)
+	{
+		UE_LOG(LogCh4_multiGame, Log, TEXT("[Lobby] Duplicate room search ignored"));
+		return;
+	}
+
 	IOnlineSubsystem* Subsystem = IOnlineSubsystem::Get();
 	if (!Subsystem)
 	{
@@ -142,10 +157,16 @@ void UCh4MainMenuViewModel::FindRooms()
 	SearchSettings->TimeoutInSeconds = 3.0f; // LAN / VPN 검색 대기 시간 3초로 안정화
 	
 	// 검색 완료 콜백 등록 (구독)
+	Session->OnFindSessionsCompleteDelegates.RemoveAll(this);
 	Session->OnFindSessionsCompleteDelegates.AddUObject(
 		this, &UCh4MainMenuViewModel::OnFindSessionsComplete);
 	
-	Session->FindSessions(0, SearchSettings.ToSharedRef());
+	if (!Session->FindSessions(0, SearchSettings.ToSharedRef()))
+	{
+		Session->OnFindSessionsCompleteDelegates.RemoveAll(this);
+		SetbIsLoading(false);
+		SetStatusText(NSLOCTEXT("Ch4MainMenu", "SearchStartFailed", "Could not start room search."));
+	}
 }
 
 
