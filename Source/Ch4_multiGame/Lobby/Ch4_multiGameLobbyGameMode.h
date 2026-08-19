@@ -17,6 +17,7 @@ public:
 
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void InitGameState() override;
+	virtual void StartPlay() override;
 	virtual void PreLogin(
 		const FString& Options,
 		const FString& Address,
@@ -33,8 +34,12 @@ public:
 
 protected:
 	/** Single source of truth for the lobby capacity, including the listen-server host. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby", meta=(ClampMin="1", UIMin="1"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby", meta=(ClampMin="2", UIMin="2"))
 	int32 MaxLobbyPlayers = 4;
+
+	/** Prevents a listen-server host from starting alone before remote players can join. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Ready", meta=(ClampMin="2", UIMin="2"))
+	int32 MinPlayersToStart = 2;
 
 	/** Verified package path for the existing gameplay map. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Lobby|Travel")

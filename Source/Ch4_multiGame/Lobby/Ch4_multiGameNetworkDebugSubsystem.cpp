@@ -38,10 +38,28 @@ void UCh4_multiGameNetworkDebugSubsystem::HandleNetworkFailure(
 	const FString& ErrorString)
 {
 	const FString FailureName = ENetworkFailure::ToString(FailureType);
+	FString Guidance = TEXT("Check the exact IP:port, Hamachi adapter, and Host UDP 7777 firewall rule.");
+	if (ErrorString.Contains(TEXT("RemoteAddr: 127.")))
+	{
+		Guidance = TEXT("Loopback address detected. Use the other PC Host's Hamachi 25.x.x.x address.");
+	}
+	else if (ErrorString.Contains(TEXT("RemoteAddr: 192.168.")))
+	{
+		Guidance = TEXT(
+			"Private LAN address detected (192.168.x.x).\n"
+			"For Hamachi use: JoinHamachi <HOST 25.x.x.x>");
+	}
+	else if (ErrorString.Contains(TEXT("RemoteAddr: 25.")))
+	{
+		Guidance = TEXT(
+			"Hamachi address was used but the Host did not answer.\n"
+			"Verify Host Listen Server, Hamachi peer status, and UDP 7777 firewall.");
+	}
+
 	const FString Details = FString::Printf(
-		TEXT("%s: %s\nCheck the exact IP:port, Hamachi adapter, and UDP firewall rule."),
+		TEXT("%s\n%s"),
 		*FailureName,
-		ErrorString.IsEmpty() ? TEXT("No error details") : *ErrorString);
+		*Guidance);
 
 	UE_LOG(LogCh4_multiGame, Error,
 		TEXT("[NetworkDebug] NETWORK FAILURE | Type: %s | Error: %s | World: %s | Driver: %s"),

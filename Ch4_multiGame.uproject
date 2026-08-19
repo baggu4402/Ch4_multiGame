@@ -24,11 +24,27 @@
 			]
 		},
 		{
+			"Name": "ModelViewViewModel",
+			"Enabled": true
+		},
+		{
 			"Name": "StateTree",
 			"Enabled": true
 		},
 		{
 			"Name": "GameplayStateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineSubsystem",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineSubsystemNull",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineSubsystemUtils",
 			"Enabled": true
 		}
 	]
