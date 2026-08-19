@@ -21,6 +21,7 @@ public class Ch4_multiGame : ModuleRules
 			"Slate",
 			"ModelViewViewModel",
 			"OnlineSubsystem",
+			"OnlineSubsystemUtils",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
