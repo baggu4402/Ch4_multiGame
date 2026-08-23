@@ -1,5 +1,6 @@
 #include "Public/Map/LevelFloorBase.h"
 #include "Components/BoxComponent.h"
+#include "GameFramework/Character.h"
 
 ALevelFloorBase::ALevelFloorBase()
 {
@@ -22,12 +23,35 @@ ALevelFloorBase::ALevelFloorBase()
 	CollisionBox = CreateDefaultSubobject<UBoxComponent>(TEXT("CollisionBox"));
 	CollisionBox->SetupAttachment(RootComponent);
 	CollisionBox->SetCollisionObjectType(ECC_WorldStatic);
+	
 }
 
 
 void ALevelFloorBase::BeginPlay()
 {
 	Super::BeginPlay();
+	
+	CollisionBox->OnComponentBeginOverlap.AddDynamic(
+		this,
+		&ALevelFloorBase::OnCollisionBoxBeginOverlap
+	);
+	
+}
+
+void ALevelFloorBase::OnCollisionBoxBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	if (!OtherActor)
+	{
+		return;
+	}
+
+	ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
+
+	if (!PlayerCharacter)
+	{
+		return;
+	}
 	
 }
 

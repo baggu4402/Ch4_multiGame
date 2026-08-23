@@ -7,8 +7,6 @@ ALevelManager::ALevelManager()
 	PrimaryActorTick.bCanEverTick = false;
 }
 
-
-
 void ALevelManager::BeginPlay()
 {
 	Super::BeginPlay();
