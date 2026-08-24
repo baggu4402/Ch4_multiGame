@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "LevelFloorBase.generated.h"
 
+class UPostProcessComponent;
 class UBoxComponent;
 
 UCLASS()
@@ -28,7 +29,17 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Collision")
 	TObjectPtr<UBoxComponent> CollisionBox;
-
+	
+	
+	UFUNCTION()
+	void OnCollisionBoxBeginOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		int32 OtherBodyIndex,
+		bool bFromSweep,
+		const FHitResult& SweepResult);
+	
 	// 시작점의 월드 Transform(위치/회전)을 반환하는 함수
 	FTransform GetStartPointTransform() const { return StartPoint->GetComponentTransform(); }
 
