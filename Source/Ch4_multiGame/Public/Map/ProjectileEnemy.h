@@ -83,8 +83,29 @@ protected:
 	//위로 반동
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation")
 	float RecoilAmount = 15.0f;
+	
+	// 뒤로 밀리는 위치 반동 양 (X축 오프셋)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation")
+	float RecoilBackAmount = -15.0f;
 
 	//현재 적용할 반동값
 	UPROPERTY(BlueprintReadOnly, Category = "Animation")
 	float RecoilPitch = 0.0f;
+	
+	// 현재 적용할 반동 위치 오프셋 (AnimBP로 전달할 오프셋)
+	UPROPERTY(BlueprintReadOnly, Category = "Animation")
+	FVector RecoilLocationOffset = FVector::ZeroVector;
+	
+	// 발사 후 회전 멈춤 시간 (예: 0.5초 동안 회전 금지)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
+	float PostFireRotationDelay = 0.5f;
+	
+	// 현재 플레이어를 향해 회전 가능한 상태인지 여부
+	bool bCanOrientToTarget = true;
+
+	// 회전 재개용 타이머
+	FTimerHandle RotationDelayTimerHandle;
+
+	// 회전을 다시 켜주는 함수
+	void ResetRotation();
 };
